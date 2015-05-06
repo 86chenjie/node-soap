@@ -1,17 +1,17 @@
 {
   "name": "soap",
-  "version": "0.3.2",
+  "version": "0.8.0",
   "description": "A minimal node SOAP client",
   "engines": {
     "node": ">=0.8.0"
   },
-  "author": {
-    "name": "Vinay Pulim",
-    "email": "v@pulim.com"
-  },
+  "author": "Vinay Pulim <v@pulim.com>",
   "dependencies": {
-    "node-expat": ">=1.6.1",
-    "request": ">=2.9.0"
+    "lodash": "~2.4.1",
+    "request": ">=2.9.0",
+    "sax": ">=0.6",
+    "strip-bom": "~0.3.1",
+    "debug": "~0.7.4"
   },
   "repository": {
     "type": "git",
@@ -22,9 +22,8 @@
     "lib": "./lib"
   },
   "scripts": {
-    "mocha": "mocha -R spec -u exports test/*-test.js",
-    "jshint": "jshint index.js lib/http.js lib/client.js lib/soap.js lib/server.js lib/wsdl.js",
-    "test": "npm run-script jshint && npm run-script mocha"
+    "pretest": "jshint index.js lib test",
+    "test": "mocha test/*-test.js test/security/*.js"
   },
   "keywords": [
     "soap"
@@ -37,16 +36,9 @@
   ],
   "devDependencies": {
     "mocha": "~1.17.0",
-    "jshint": "~2.4.2"
-  },
-  "readme": "This module lets you connect to web services using SOAP.  It also provides a server that allows you to run your own SOAP services.\r\n\r\n[![Build Status](https://travis-ci.org/milewise/node-soap.png?branch=master)](https://travis-ci.org/milewise/node-soap)\r\n\r\nFeatures:\r\n\r\n* Very simple API\r\n* Handles both RPC and Document schema types\r\n* Supports multiRef SOAP messages (thanks to [@kaven276](https://github.com/kaven276))\r\n* Support for both synchronous and asynchronous method handlers\r\n* WS-Security (currently only UsernameToken and PasswordText encoding is supported)\r\n\r\n## Install\r\n\r\nInstall with [npm](http://github.com/isaacs/npm):\r\n\r\n```\r\n  npm install soap\r\n```\r\n## Module\r\n\r\n### soap.createClient(url, callback) - create a new SOAP client from a WSDL url. Also supports a local filesystem path.\r\n\r\n``` javascript\r\n  var soap = require('soap');\r\n  var url = 'http://example.com/wsdl?wsdl';\r\n  var args = {name: 'value'};\r\n  soap.createClient(url, function(err, client) {\r\n      client.MyFunction(args, function(err, result) {\r\n          console.log(result);\r\n      });\r\n  });\r\n```\r\n\r\n### soap.listen(*server*, *path*, *services*, *wsdl*) - create a new SOAP server that listens on *path* and provides *services*.\r\n*wsdl* is an xml string that defines the service.\r\n\r\n``` javascript\r\n  var myService = {\r\n      MyService: {\r\n          MyPort: {\r\n              MyFunction: function(args) {\r\n                  return {\r\n                      name: args.name\r\n                  };\r\n              }\r\n\r\n              // This is how to define an asynchronous function.  \r\n              MyAsyncFunction: function(args, callback) {\r\n                  // do some work\r\n                  callback({\r\n                      name: args.name\r\n                  })\r\n              }\r\n          }\r\n      }\r\n  }\r\n\r\n  var xml = require('fs').readFileSync('myservice.wsdl', 'utf8'),\r\n      server = http.createServer(function(request,response) {\r\n          response.end(\"404: Not Found: \"+request.url)\r\n      });\r\n\r\n  server.listen(8000);\r\n  soap.listen(server, '/wsdl', myService, xml);\r\n```\r\n\r\n### server logging\r\n\r\nIf the log method is defined it will be called with 'received' and 'replied'\r\nalong with data.\r\n\r\n``` javascript\r\n  server = soap.listen(...)\r\n  server.log = function(type, data) {\r\n    // type is 'received' or 'replied'\r\n  };\r\n```\r\n\r\n### server security example using PasswordDigest\r\n\r\nIf server.authenticate is not defined no authentation will take place.\r\n\r\n``` javascript\r\n  server = soap.listen(...)\r\n  server.authenticate = function(security) {\r\n    var created, nonce, password, user, token;\r\n    token = security.UsernameToken, user = token.Username,\r\n            password = token.Password, nonce = token.Nonce, created = token.Created;\r\n    return user === 'user' && password === soap.passwordDigest(nonce, created, 'password');\r\n  };\r\n```\r\n\r\n### server connection authorization\r\n\r\nThis is called prior to soap service method\r\nIf the method is defined and returns false the incoming connection is\r\nterminated.\r\n\r\n``` javascript\r\n  server = soap.listen(...)\r\n  server.authorizeConnection = function(req) {\r\n    return true; // or false\r\n  };\r\n```\r\n\r\n\r\n## Client\r\n\r\nAn instance of Client is passed to the soap.createClient callback.  It is used to execute methods on the soap service.\r\n\r\n### Client.describe() - description of services, ports and methods as a JavaScript object\r\n\r\n``` javascript\r\n  client.describe() // returns\r\n    {\r\n      MyService: {\r\n        MyPort: {\r\n          MyFunction: {\r\n            input: {\r\n              name: 'string'\r\n            }\r\n          }\r\n        }\r\n      }\r\n    }\r\n```\r\n\r\n### Client.setSecurity(security) - use the specified security protocol (see WSSecurity below)\r\n\r\n``` javascript\r\n  client.setSecurity(new WSSecurity('username', 'password'))\r\n```\r\n\r\n### Client.*method*(args, callback) - call *method* on the SOAP service.\r\n\r\n``` javascript\r\n  client.MyFunction({name: 'value'}, function(err, result) {\r\n      // result is a javascript object\r\n  })\r\n```\r\n### Client.*service*.*port*.*method*(args, callback) - call a *method* using a specific *service* and *port*\r\n\r\n``` javascript\r\n  client.MyService.MyPort.MyFunction({name: 'value'}, function(err, result) {\r\n      // result is a javascript object\r\n  })\r\n```\r\n### Client.*addSoapHeader*(soapHeader[, name, namespace, xmlns]) - add soapHeader to soap:Header node\r\n#### Options\r\n\r\n - `soapHeader`     Object({rootName: {name: \"value\"}}) or strict xml-string\r\n\r\n##### Optional parameters when first arg is object :\r\n - `name`           Unknown parameter (it could just a empty string)\r\n - `namespace`      prefix of xml namespace\r\n - `xmlns`          URI\r\n\r\n### Client.*lastRequest* - the property that contains last full soap request for client logging\r\n\r\n## WSSecurity\r\n\r\nWSSecurity implements WS-Security.  UsernameToken and PasswordText/PasswordDigest is supported. An instance of WSSecurity is passed to Client.setSecurity.\r\n\r\n``` javascript\r\n  new WSSecurity(username, password, passwordType)\r\n    //'PasswordDigest' or 'PasswordText' default is PasswordText\r\n```\r\n",
-  "readmeFilename": "Readme.md",
-  "bugs": {
-    "url": "https://github.com/milewise/node-soap/issues"
-  },
-  "homepage": "https://github.com/milewise/node-soap",
-  "_id": "soap@0.3.2",
-  "_shasum": "f5fbfb59e7097d2bc96c7f629e934d1c52a8604f",
-  "_resolved": "git://github.com/86chenjie/node-soap.git#2d3871eb7a459d9ad456a293e05e6fe6ba7f54c4",
-  "_from": "soap@git://github.com/86chenjie/node-soap.git#2d3871eb7a459d9ad456a293e05e6fe6ba7f54c4"
+    "jshint": "2.3.0",
+    "glob": "~3.2.8",
+    "should": "~3.3.0",
+    "timekeeper": "~0.0.4"
+  }
 }
